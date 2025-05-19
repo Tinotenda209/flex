@@ -4,24 +4,24 @@ const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const bcrypt = require('bcrypt');
+const http = require('http');
+const socketIo = require('socket.io');
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
+
 const PORT = process.env.PORT || 8080;
 
 // Middleware
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json()); // For parsing application/json
+app.use(express.static(path.join(__dirname)));
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 
-
-//app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from 'public' directory
-app.use(express.static(path.join(__dirname)));
-
-
-// Connect to SQLite database
+// Database connection
 const db = new sqlite3.Database('healthcare_appointment_system.db', sqlite3.OPEN_READWRITE, (err) => {
     if (err) {
         console.error(err.message);
@@ -30,18 +30,50 @@ const db = new sqlite3.Database('healthcare_appointment_system.db', sqlite3.OPEN
     }
 });
 
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+    console.log('A user connected');
+
+    socket.on('newAppointment', (data) => {
+        io.emit('appointmentNotification', {
+            message: 'New appointment scheduled',
+            data: data
+        });
+    });
+
+    socket.on('disconnect', () => {
+        console.log('User disconnected');
+    });
+});
+
+// Analytics endpoints
+app.get('/api/analytics/appointments', (req, res) => {
+    const sql = `
+        SELECT 
+            strftime('%Y-%m', date) as month,
+            COUNT(*) as count
+        FROM appointments
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT 6
+    `;
+    
+    db.all(sql, [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+        }
+        res.json(rows);
+    });
+});
 
 // Route for the homepage
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'Group Project', 'index.html'));
 });
 
-
-// Fetch data from the database
-
 // PROVIDERS TABLE
 const getProviders = (req, res) => {
-    
     const sql = `SELECT * FROM providers`;
 
     db.all(sql, [], (err, rows) => {
@@ -49,18 +81,15 @@ const getProviders = (req, res) => {
             console.error(err.message);
             return res.status(400).json({ error: err.message });
         }
-        res.json(rows); // Send back the providers data
+        res.json(rows);
     });
 };
 
 app.get('/api/providers', getProviders);
 
-//APPROVED APPOINTMENT TABLE GET FUNCTION
-
 const getApprovedAppointments = (req, res) => {
     const email = req.query.email;
 
-    // SQL query to select appointments based on the provided email
     const sql = `SELECT * FROM approved_appointments WHERE email = ?`;
 
     db.all(sql, [email], (err, rows) => {
@@ -68,12 +97,11 @@ const getApprovedAppointments = (req, res) => {
             console.error(err.message);
             return res.status(500).json({ error: err.message });
         }
-        res.json(rows); // Send back the approved appointments data
+        res.json(rows);
     });
 };
 
 app.get('/api/approved_appointments/fetch', getApprovedAppointments);
-
 
 const getAppointments = (req, res) => {
     db.all('SELECT * FROM appointments', [], (err, rows) => {
@@ -119,6 +147,7 @@ const getStaff = (req, res) => {
         res.json(rows);
     });
 };
+
 const getCancelledAAppointments = (req, res) => {
     db.all('SELECT * FROM Cancelled_appointments', [], (err, rows) => {
         if (err) {
@@ -128,7 +157,6 @@ const getCancelledAAppointments = (req, res) => {
     });
 };
 
-// Define the routes
 app.get('/api/appointments', getAppointments);
 app.get('/api/approved_appointments', getAApprovedAppointments);
 app.get('/api/cancelled-appointments', getCancelledAppointments);
@@ -191,6 +219,7 @@ const appointmentProvider = (req, res) => {
         res.json({ message: 'appointments deleted successfully.' });
     });
 };
+
 const approvedProvider = (req, res) => {
     const approved_appointmentsId = req.params.id;
 
@@ -210,10 +239,7 @@ app.delete('/api/patients/:id', patientsProvider);
 app.delete('/api/staff/:id', staffProvider);
 app.delete('/api/appointments/:id', appointmentProvider);
 app.delete('/api/approved_appointments/:id', approvedProvider);
-//ENDPOINTS FOR POSTING DATA
 
-
-// Patient login 
 const loginPatient = (req, res) => {
     const { Email, Password } = req.body;
     db.get('SELECT * FROM patients WHERE email = ?', [Email], (err, row) => {
@@ -228,7 +254,6 @@ const loginPatient = (req, res) => {
     });
 };
 
-//Register patient
 const registerPatient = (req, res) => {
     const { Email, Password, Name, Surname, Phone } = req.body;
     db.get('SELECT * FROM patients WHERE email = ?', [Email], (err, row) => {
@@ -246,7 +271,6 @@ const registerPatient = (req, res) => {
     });
 };
 
-// Staff login 
 const loginstaff = (req, res) => {
     const { Email, Password } = req.body;
     db.get('SELECT * FROM staff WHERE email = ?', [Email], (err, row) => {
@@ -259,7 +283,7 @@ const loginstaff = (req, res) => {
         });
     });
 };
-//staff register
+
 const addstaff = (req, res) => {
     const { Email, Password, Name, Surname } = req.body;
     db.get('SELECT * FROM staff WHERE email = ?', [Email], (err, row) => {
@@ -277,7 +301,6 @@ const addstaff = (req, res) => {
     });
 };
 
-//Create an appointment
 const CreateAppointment = (req, res) => {
     const { name, surname, email, date } = req.body;
     const sql = `INSERT INTO appointments (name, surname, email, date) VALUES (?, ?, ?, ?)`;
@@ -292,7 +315,6 @@ const CreateAppointment = (req, res) => {
     });
 };
 
-// Doctor login 
 const Doctorlogin = (req, res) => {
     const { Email, Password } = req.body;
     db.get('SELECT * FROM providers WHERE email = ?', [Email], (err, row) => {
@@ -305,7 +327,7 @@ const Doctorlogin = (req, res) => {
         });
     });
 };
-// Function to register a DOCTOR
+
 const addprovider = (req, res) => {
     const { Email, Password, Name, Surname, Availability, Speciality } = req.body;
     db.get('SELECT * FROM providers WHERE email = ?', [Email], (err, row) => {
@@ -323,7 +345,6 @@ const addprovider = (req, res) => {
     });
 };
 
-// Endpoint to approve_appointment
 const registerAppointment = (req, res) => {
     const { name, surname, email, date, time, doctor, status } = req.body;
 
@@ -355,11 +376,6 @@ app.post('/api/appointments', CreateAppointment);
 app.post('/api/providers', Doctorlogin);
 app.post('/api/provider/register', addprovider);
 app.post('/api/approved_appointments/register', registerAppointment);
-
-
-//ENDPOINTS FOR EDITING DATA
-
-// Update provider availability
 
 const updateProviderAvailability = (req, res) => {
     const providerId = req.params.id;
@@ -402,10 +418,6 @@ const updatePProviderAvailability = (req, res) => {
 app.put('/api/providers/:id/availability', updatePProviderAvailability);
 app.put('/api/providers/:id/availability', updateProviderAvailability);
 
-
-
-// Start the server
-
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
