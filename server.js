@@ -3,7 +3,7 @@ const path = require('path');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const http = require('http');
 const socketIo = require('socket.io');
 
